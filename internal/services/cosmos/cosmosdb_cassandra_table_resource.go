@@ -266,7 +266,7 @@ func resourceCosmosDbCassandraTableRead(d *pluginsdk.ResourceData, meta interfac
 		return fmt.Errorf("cosmosDB Account %q (Resource Group %q) ID is empty or nil", id.DatabaseAccountName, id.ResourceGroup)
 	}
 
-	if !isServerlessCapacityMode(accResp) {
+	if !common.IsServerlessCapacityModeLegacy(accResp) {
 		throughputResp, err := client.GetCassandraTableThroughput(ctx, id.ResourceGroup, id.DatabaseAccountName, id.CassandraKeyspaceName, id.TableName)
 		if err != nil {
 			if !utils.ResponseWasNotFound(throughputResp.Response) {

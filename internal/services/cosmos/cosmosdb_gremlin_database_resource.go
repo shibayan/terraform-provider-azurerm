@@ -209,7 +209,7 @@ func resourceCosmosGremlinDatabaseRead(d *pluginsdk.ResourceData, meta interface
 		return fmt.Errorf("reading Cosmos Account %q : %+v", id.DatabaseAccountName, err)
 	}
 
-	if !isServerlessCapacityMode(accResp) {
+	if !common.IsServerlessCapacityModeLegacy(accResp) {
 		throughputResp, err := client.GremlinResourcesGetGremlinDatabaseThroughput(ctx, *id)
 		if err != nil {
 			if !response.WasNotFound(throughputResp.HttpResponse) {

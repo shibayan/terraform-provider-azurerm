@@ -8,15 +8,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/cosmos-db/mgmt/2021-10-15/documentdb" // nolint: staticcheck
+	"github.com/hashicorp/go-azure-helpers/lang/response"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/cosmosdb"
 	"github.com/hashicorp/terraform-provider-azurerm/helpers/tf"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/validate"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/validation"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/timeouts"
-	"github.com/hashicorp/terraform-provider-azurerm/utils"
 )
 
 func resourceCosmosDbSQLFunction() *pluginsdk.Resource {
@@ -34,7 +33,7 @@ func resourceCosmosDbSQLFunction() *pluginsdk.Resource {
 		},
 
 		Importer: pluginsdk.ImporterValidatingResourceId(func(id string) error {
-			_, err := parse.SqlFunctionID(id)
+			_, err := cosmosdb.ParseUserDefinedFunctionID(id)
 			return err
 		}),
 
@@ -62,44 +61,44 @@ func resourceCosmosDbSQLFunction() *pluginsdk.Resource {
 }
 
 func resourceCosmosDbSQLFunctionCreateUpdate(d *pluginsdk.ResourceData, meta interface{}) error {
+	client := meta.(*clients.Client).Cosmos.CosmosDBClient
 	subscriptionId := meta.(*clients.Client).Account.SubscriptionId
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
 	ctx, cancel := timeouts.ForCreateUpdate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
 	name := d.Get("name").(string)
-	containerId, _ := parse.SqlContainerID(d.Get("container_id").(string))
+	containerId, _ := cosmosdb.ParseContainerID(d.Get("container_id").(string))
 	body := d.Get("body").(string)
 
-	id := parse.NewSqlFunctionID(subscriptionId, containerId.ResourceGroup, containerId.DatabaseAccountName, containerId.SqlDatabaseName, containerId.ContainerName, name)
+	id := cosmosdb.NewUserDefinedFunctionID(subscriptionId, containerId.ResourceGroupName, containerId.DatabaseAccountName, containerId.SqlDatabaseName, containerId.ContainerName, name)
 
 	if d.IsNewResource() {
-		existing, err := client.GetSQLUserDefinedFunction(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.UserDefinedFunctionName)
+		existing, err := client.SqlResourcesGetSqlUserDefinedFunction(ctx, id)
 		if err != nil {
-			if !utils.ResponseWasNotFound(existing.Response) {
+			if !response.WasNotFound(existing.HttpResponse) {
 				return fmt.Errorf("checking for existing CosmosDb SqlFunction %q: %+v", id, err)
 			}
 		}
-		if !utils.ResponseWasNotFound(existing.Response) {
+		if !response.WasNotFound(existing.HttpResponse) {
 			return tf.ImportAsExistsError("azurerm_cosmosdb_sql_function", id.ID())
 		}
 	}
 
-	createUpdateSqlUserDefinedFunctionParameters := documentdb.SQLUserDefinedFunctionCreateUpdateParameters{
-		SQLUserDefinedFunctionCreateUpdateProperties: &documentdb.SQLUserDefinedFunctionCreateUpdateProperties{
-			Resource: &documentdb.SQLUserDefinedFunctionResource{
-				ID:   &name,
+	createUpdateSqlUserDefinedFunctionParameters := cosmosdb.SqlUserDefinedFunctionCreateUpdateParameters{
+		Properties: cosmosdb.SqlUserDefinedFunctionCreateUpdateProperties{
+			Resource: cosmosdb.SqlUserDefinedFunctionResource{
+				Id:   name,
 				Body: &body,
 			},
-			Options: &documentdb.CreateUpdateOptions{},
+			Options: &cosmosdb.CreateUpdateOptions{},
 		},
 	}
-	future, err := client.CreateUpdateSQLUserDefinedFunction(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.UserDefinedFunctionName, createUpdateSqlUserDefinedFunctionParameters)
+	future, err := client.SqlResourcesCreateUpdateSqlUserDefinedFunction(ctx, id, createUpdateSqlUserDefinedFunctionParameters)
 	if err != nil {
 		return fmt.Errorf("creating/updating CosmosDb SqlFunction %q: %+v", id, err)
 	}
 
-	if err := future.WaitForCompletionRef(ctx, client.Client); err != nil {
+	if err := future.Poller.PollUntilDone(); err != nil {
 		return fmt.Errorf("waiting for creation/update of the CosmosDb SqlFunction %q: %+v", id, err)
 	}
 
@@ -108,28 +107,28 @@ func resourceCosmosDbSQLFunctionCreateUpdate(d *pluginsdk.ResourceData, meta int
 }
 
 func resourceCosmosDbSQLFunctionRead(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.CosmosDBClient
 	ctx, cancel := timeouts.ForRead(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id, err := parse.SqlFunctionID(d.Id())
+	id, err := cosmosdb.ParseUserDefinedFunctionID(d.Id())
 	if err != nil {
 		return err
 	}
 
-	resp, err := client.GetSQLUserDefinedFunction(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.UserDefinedFunctionName)
+	resp, err := client.SqlResourcesGetSqlUserDefinedFunction(ctx, *id)
 	if err != nil {
-		if utils.ResponseWasNotFound(resp.Response) {
+		if response.WasNotFound(resp.HttpResponse) {
 			log.Printf("[INFO] CosmosDb SqlFunction %q does not exist - removing from state", d.Id())
 			d.SetId("")
 			return nil
 		}
 		return fmt.Errorf("retrieving CosmosDb SqlFunction %q: %+v", id, err)
 	}
-	containerId := parse.NewSqlContainerID(id.SubscriptionId, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName)
+	containerId := cosmosdb.NewContainerID(id.SubscriptionId, id.ResourceGroupName, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName)
 	d.Set("name", id.UserDefinedFunctionName)
 	d.Set("container_id", containerId.ID())
-	if props := resp.SQLUserDefinedFunctionGetProperties; props != nil {
+	if props := resp.Model.Properties; props != nil {
 		if props.Resource != nil {
 			d.Set("body", props.Resource.Body)
 		}
@@ -138,21 +137,21 @@ func resourceCosmosDbSQLFunctionRead(d *pluginsdk.ResourceData, meta interface{}
 }
 
 func resourceCosmosDbSQLFunctionDelete(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.CosmosDBClient
 	ctx, cancel := timeouts.ForDelete(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id, err := parse.SqlFunctionID(d.Id())
+	id, err := cosmosdb.ParseUserDefinedFunctionID(d.Id())
 	if err != nil {
 		return err
 	}
 
-	future, err := client.DeleteSQLUserDefinedFunction(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.UserDefinedFunctionName)
+	future, err := client.SqlResourcesDeleteSqlUserDefinedFunction(ctx, *id)
 	if err != nil {
 		return fmt.Errorf("deleting CosmosDb SqlFunction %q: %+v", id, err)
 	}
 
-	if err := future.WaitForCompletionRef(ctx, client.Client); err != nil {
+	if err := future.Poller.PollUntilDone(); err != nil {
 		return fmt.Errorf("waiting for deletion of the CosmosDb SqlFunction %q: %+v", id, err)
 	}
 	return nil

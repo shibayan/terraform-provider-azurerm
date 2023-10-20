@@ -428,7 +428,7 @@ func resourceCosmosDbGremlinGraphRead(d *pluginsdk.ResourceData, meta interface{
 		return fmt.Errorf("cosmosDB Account %q (Resource Group %q) ID is empty or nil", id.DatabaseAccountName, id.ResourceGroupName)
 	}
 
-	if !isServerlessCapacityMode(accResp) {
+	if !common.IsServerlessCapacityModeLegacy(accResp) {
 		throughputResp, err := client.GremlinResourcesGetGremlinGraphThroughput(ctx, *id)
 		if err != nil {
 			if !response.WasNotFound(throughputResp.HttpResponse) {

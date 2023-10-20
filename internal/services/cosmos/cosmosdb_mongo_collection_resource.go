@@ -368,7 +368,7 @@ func resourceCosmosDbMongoCollectionRead(d *pluginsdk.ResourceData, meta interfa
 	}
 
 	// if the cosmos account is serverless calling the get throughput api would yield an error
-	if !isServerlessCapacityMode(accResp) {
+	if !common.IsServerlessCapacityModeLegacy(accResp) {
 		throughputResp, err := client.GetMongoDBCollectionThroughput(ctx, id.ResourceGroup, id.DatabaseAccountName, id.MongodbDatabaseName, id.CollectionName)
 		if err != nil {
 			if !utils.ResponseWasNotFound(throughputResp.Response) {

@@ -11,6 +11,8 @@ import (
 	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2022-11-15/mongorbacs"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/cosmosdb"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/managedcassandras"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/rbacs"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/restorables"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/postgresqlhsc/2022-11-08/clusters"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/postgresqlhsc/2022-11-08/configurations"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/postgresqlhsc/2022-11-08/firewallrules"
@@ -30,7 +32,9 @@ type Client struct {
 	MongoDbClient                    *documentdb.MongoDBResourcesClient
 	MongoRBACClient                  *mongorbacs.MongorbacsClient
 	NotebookWorkspaceClient          *documentdb.NotebookWorkspacesClient
+	RbacsClient                      *rbacs.RbacsClient
 	RestorableDatabaseAccountsClient *documentdb.RestorableDatabaseAccountsClient
+	RestorablesClient                *restorables.RestorablesClient
 	RolesClient                      *roles.RolesClient
 	SqlDedicatedGatewayClient        *sqldedicatedgateway.SqlDedicatedGatewayClient
 	SqlClient                        *documentdb.SQLResourcesClient
@@ -81,8 +85,14 @@ func NewClient(o *common.ClientOptions) (*Client, error) {
 	notebookWorkspaceClient := documentdb.NewNotebookWorkspacesClientWithBaseURI(o.ResourceManagerEndpoint, o.SubscriptionId)
 	o.ConfigureClient(&notebookWorkspaceClient.Client, o.ResourceManagerAuthorizer)
 
+	rbacsClient := rbacs.NewRbacsClientWithBaseURI(o.ResourceManagerEndpoint)
+	o.ConfigureClient(&rbacsClient.Client, o.ResourceManagerAuthorizer)
+
 	restorableDatabaseAccountsClient := documentdb.NewRestorableDatabaseAccountsClientWithBaseURI(o.ResourceManagerEndpoint, o.SubscriptionId)
 	o.ConfigureClient(&restorableDatabaseAccountsClient.Client, o.ResourceManagerAuthorizer)
+
+	restorablesClient := restorables.NewRestorablesClientWithBaseURI(o.ResourceManagerEndpoint)
+	o.ConfigureClient(&restorablesClient.Client, o.ResourceManagerAuthorizer)
 
 	rolesClient, err := roles.NewRolesClientWithBaseURI(o.Environment.ResourceManager)
 	if err != nil {
@@ -114,7 +124,9 @@ func NewClient(o *common.ClientOptions) (*Client, error) {
 		MongoDbClient:                    &mongoDbClient,
 		MongoRBACClient:                  &mongorbacsClient,
 		NotebookWorkspaceClient:          &notebookWorkspaceClient,
+		RbacsClient:                      &rbacsClient,
 		RestorableDatabaseAccountsClient: &restorableDatabaseAccountsClient,
+		RestorablesClient:                &restorablesClient,
 		RolesClient:                      rolesClient,
 		SqlDedicatedGatewayClient:        &sqlDedicatedGatewayClient,
 		SqlClient:                        &sqlClient,

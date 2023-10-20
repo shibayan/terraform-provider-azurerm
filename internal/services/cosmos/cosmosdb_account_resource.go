@@ -27,8 +27,6 @@ import (
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/features"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/common"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/validate"
 	keyVaultParse "github.com/hashicorp/terraform-provider-azurerm/internal/services/keyvault/parse"
 	keyVaultSuppress "github.com/hashicorp/terraform-provider-azurerm/internal/services/keyvault/suppress"
 	keyVaultValidate "github.com/hashicorp/terraform-provider-azurerm/internal/services/keyvault/validate"
@@ -172,7 +170,7 @@ func resourceCosmosDbAccount() *pluginsdk.Resource {
 		),
 
 		Importer: pluginsdk.ImporterValidatingResourceId(func(id string) error {
-			_, err := parse.DatabaseAccountID(id)
+			_, err := cosmosdb.ParseDatabaseAccountID(id)
 			return err
 		}),
 
@@ -569,7 +567,7 @@ func resourceCosmosDbAccount() *pluginsdk.Resource {
 							Type:         pluginsdk.TypeString,
 							Required:     true,
 							ForceNew:     true,
-							ValidateFunc: validate.RestorableDatabaseAccountID,
+							ValidateFunc: restorables.ValidateRestorableDatabaseAccountID,
 						},
 
 						"restore_timestamp_in_utc": {
@@ -807,6 +805,7 @@ func resourceCosmosDbAccountCreate(d *pluginsdk.ResourceData, meta interface{}) 
 			return fmt.Errorf("CosmosDB Account %s already exists, please import the resource via terraform import", id.DatabaseAccountName)
 		}
 	}
+
 	geoLocations, err := expandAzureRmCosmosDBAccountGeoLocations(d)
 	if err != nil {
 		return fmt.Errorf("expanding %s geo locations: %+v", id, err)
@@ -836,9 +835,9 @@ func resourceCosmosDbAccountCreate(d *pluginsdk.ResourceData, meta interface{}) 
 		Properties: cosmosdb.DatabaseAccountCreateUpdateProperties{
 			DatabaseAccountOfferType:           cosmosdb.DatabaseAccountOfferType(offerType),
 			IPRules:                            ipRangeFilter,
-			IsVirtualNetworkFilterEnabled:      utils.Bool(isVirtualNetworkFilterEnabled),
-			EnableFreeTier:                     utils.Bool(enableFreeTier),
-			EnableAutomaticFailover:            utils.Bool(enableAutomaticFailover),
+			IsVirtualNetworkFilterEnabled:      pointer.FromBool(isVirtualNetworkFilterEnabled),
+			EnableFreeTier:                     pointer.FromBool(enableFreeTier),
+			EnableAutomaticFailover:            pointer.FromBool(enableAutomaticFailover),
 			ConsistencyPolicy:                  expandAzureRmCosmosDBAccountConsistencyPolicy(d),
 			Locations:                          geoLocations,
 			Capabilities:                       capabilities,
@@ -1045,26 +1044,18 @@ func resourceCosmosDbAccountUpdate(d *pluginsdk.ResourceData, meta interface{}) 
 			updateRequired = true
 		}
 
-		// Incident : #383341730
-		// Azure Bug: #2209567 'Updating identities and default identity at the same time fails silently'
-		//
-		// The 'Identity' field should only ever be sent once to the endpoint, except for updates and removal. If the
-		// 'Identity' field is included in the update call with the 'DefaultIdentity' it will silently fail
-		// per the bug noted above (e.g. Azure Bug #2209567).
-		//
-		// In the update scenario where the end-user would like to update their 'Identity' and their 'DefaultIdentity'
-		// fields at the same time both of these operations need to happen atomically in separate PUT/PATCH calls
-		// to the service else you will hit the bug mentioned above. You need to update the 'Identity' field
-		// first then update the 'DefaultIdentity' in totally different PUT/PATCH calls where you have to drop
-		// the 'Identity' field on the floor when updating the 'DefaultIdentity' field.
-		//
-		// NOTE      : If the 'Identity' field has not changed in the resource, do not send it in the payload.
-		//             this workaround can be removed once the service team fixes the above mentioned bug.
-		//
-		// ADDITIONAL: You cannot update properties and add/remove replication locations or update the enabling of
-		//             multiple write locations at the same time. So you must update any changed properties
-		//             first, then address the replication locations and/or updating/enabling of
-		//             multiple write locations.
+	// NOTE: these fields are expanded directly into the
+	// 'DatabaseAccountCreateUpdateParameters' below or
+	// are included in the 'DatabaseAccountCreateUpdateParameters'
+	// later, however we need to know if they changed or not...
+	if d.HasChanges("consistency_policy", "virtual_network_rule", "cors_rule", "access_key_metadata_writes_enabled",
+		"network_acl_bypass_for_azure_services", "network_acl_bypass_ids", "analytical_storage",
+		"capacity", "create_mode", "restore", "key_vault_key_id", "mongo_server_version",
+		"public_network_access_enabled", "ip_range_filter", "offer_type", "is_virtual_network_filter_enabled",
+		"kind", "tags", "enable_free_tier", "enable_automatic_failover", "analytical_storage_enabled",
+		"local_authentication_disabled") {
+		updateRequired = true
+	}
 
 		account := cosmosdb.DatabaseAccountCreateUpdateParameters{
 			Location: pointer.To(location),
@@ -1225,16 +1216,24 @@ func resourceCosmosDbAccountUpdate(d *pluginsdk.ResourceData, meta interface{}) 
 		identityChanged := false
 		expandedIdentity, err := identity.ExpandLegacySystemAndUserAssignedMap(d.Get("identity").([]interface{}))
 		if err != nil {
-			return fmt.Errorf("expanding `identity`: %+v", err)
+			return fmt.Errorf("could not parse Key Vault Key ID: %+v", err)
 		}
+		accountProps.KeyVaultKeyUri = pointer.To(keyVaultKey.ID())
+	}
 
-		if d.HasChange("identity") {
-			identityChanged = true
+	// 'default_identity_type' will always have a value since it now has a default value of "FirstPartyIdentity" per the API documentation.
+	// I do not include 'DefaultIdentity' and 'Identity' in the 'accountProps' intentionally, these operations need to be
+	// performed mutually exclusive from each other in an atomic fashion, else you will hit the service teams bug...
+	updateDefaultIdentity := false
+	if d.HasChange("default_identity_type") {
+		updateDefaultIdentity = true
+	}
 
-			// Looks like you have to always remove all the identities first before you can
-			// reassign/modify them, else it will append any new/changed identities
-			// resulting in a diff...
-			log.Printf("[INFO] Updating AzureRM Cosmos DB Account: Setting 'Identity' to 'None'")
+	// adding 'DefaultIdentity' to avoid causing it to fallback
+	// to "FirstPartyIdentity" on update(s), issue #22466
+	if v, ok := d.GetOk("default_identity_type"); ok {
+		accountProps.DefaultIdentity = pointer.To(v.(string))
+	}
 
 			// can't set this back to account, because that will hit the bug...
 			identityVal := cosmosdb.DatabaseAccountUpdateParameters{
@@ -1440,6 +1439,79 @@ func resourceCosmosDbAccountRead(d *pluginsdk.ResourceData, meta interface{}) er
 
 		d.Set("cors_rule", common.FlattenCosmosCorsRule(props.Cors))
 	}
+
+	d.Set("endpoint", props.DocumentEndpoint)
+	d.Set("enable_free_tier", props.EnableFreeTier)
+	d.Set("analytical_storage_enabled", props.EnableAnalyticalStorage)
+	d.Set("public_network_access_enabled", *props.PublicNetworkAccess == cosmosdb.PublicNetworkAccessEnabled)
+	d.Set("default_identity_type", props.DefaultIdentity)
+	d.Set("create_mode", props.CreateMode)
+
+	if v := props.IsVirtualNetworkFilterEnabled; v != nil {
+		d.Set("is_virtual_network_filter_enabled", props.IsVirtualNetworkFilterEnabled)
+	}
+
+	if v := props.EnableAutomaticFailover; v != nil {
+		d.Set("enable_automatic_failover", props.EnableAutomaticFailover)
+	}
+
+	if v := props.KeyVaultKeyUri; v != nil {
+		d.Set("key_vault_key_id", props.KeyVaultKeyUri)
+	}
+
+	if v := props.EnableMultipleWriteLocations; v != nil {
+		d.Set("enable_multiple_write_locations", props.EnableMultipleWriteLocations)
+	}
+
+	if err := d.Set("analytical_storage", flattenCosmosDBAccountAnalyticalStorageConfiguration(props.AnalyticalStorageConfiguration)); err != nil {
+		return fmt.Errorf("setting `analytical_storage`: %+v", err)
+	}
+
+	if err := d.Set("capacity", flattenCosmosDBAccountCapacity(props.Capacity)); err != nil {
+		return fmt.Errorf("setting `capacity`: %+v", err)
+	}
+
+	if err := d.Set("restore", flattenCosmosdbAccountRestoreParameters(props.RestoreParameters)); err != nil {
+		return fmt.Errorf("setting `restore`: %+v", err)
+	}
+
+	if err = d.Set("consistency_policy", flattenAzureRmCosmosDBAccountConsistencyPolicy(props.ConsistencyPolicy)); err != nil {
+		return fmt.Errorf("setting CosmosDB Account %q `consistency_policy` (Resource Group %q): %+v", id.DatabaseAccountName, id.ResourceGroupName, err)
+	}
+
+	if err = d.Set("geo_location", flattenAzureRmCosmosDBAccountGeoLocations(props)); err != nil {
+		return fmt.Errorf("setting `geo_location`: %+v", err)
+	}
+
+	if err = d.Set("capabilities", flattenAzureRmCosmosDBAccountCapabilities(props.Capabilities)); err != nil {
+		return fmt.Errorf("setting `capabilities`: %+v", err)
+	}
+
+	if err = d.Set("virtual_network_rule", flattenAzureRmCosmosDBAccountVirtualNetworkRules(props.VirtualNetworkRules)); err != nil {
+		return fmt.Errorf("setting `virtual_network_rule`: %+v", err)
+	}
+
+	d.Set("access_key_metadata_writes_enabled", !*props.DisableKeyBasedMetadataWriteAccess)
+	if apiProps := props.ApiProperties; apiProps != nil {
+		d.Set("mongo_server_version", apiProps.ServerVersion)
+	}
+	d.Set("network_acl_bypass_for_azure_services", *props.NetworkAclBypass == cosmosdb.NetworkAclBypassAzureServices)
+	d.Set("network_acl_bypass_ids", utils.FlattenStringSlice(props.NetworkAclBypassResourceIds))
+
+	if v := props.DisableLocalAuth; v != nil {
+		d.Set("local_authentication_disabled", props.DisableLocalAuth)
+	}
+
+	policy, err := flattenCosmosdbAccountBackup(props.BackupPolicy)
+	if err != nil {
+		return err
+	}
+
+	if err = d.Set("backup", policy); err != nil {
+		return fmt.Errorf("setting `backup`: %+v", err)
+	}
+
+	d.Set("cors_rule", common.FlattenCosmosCorsRule(props.Cors))
 
 	readEndpoints := make([]string, 0)
 	if p := existing.Model.Properties.ReadLocations; p != nil {
@@ -1791,7 +1863,7 @@ func flattenAzureRmCosmosDBAccountGeoLocations(account *cosmosdb.DatabaseAccount
 		lb := map[string]interface{}{
 			"id":                id,
 			"location":          location.NormalizeNilable(l.LocationName),
-			"failover_priority": int(pointer.From(l.FailoverPriority)),
+			"failover_priority": int(*l.FailoverPriority),
 			// there is no zone redundancy information in FailoverPolicies currently, we have to search it by `id` in the Locations property.
 			"zone_redundant": findZoneRedundant(account.Locations, id),
 		}
@@ -2022,7 +2094,7 @@ func flattenCosmosDBAccountCapacity(input *cosmosdb.Capacity) []interface{} {
 
 	var totalThroughputLimit int64
 	if input.TotalThroughputLimit != nil {
-		totalThroughputLimit = *input.TotalThroughputLimit
+		totalThroughputLimit = int(*input.TotalThroughputLimit)
 	}
 
 	return []interface{}{

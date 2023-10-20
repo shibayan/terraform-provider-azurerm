@@ -8,15 +8,15 @@ import (
 	"log"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/cosmos-db/mgmt/2021-10-15/documentdb" // nolint: staticcheck
+	"github.com/hashicorp/go-azure-helpers/lang/pointer"
+	"github.com/hashicorp/go-azure-helpers/lang/response"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/cosmosdb"
 	"github.com/hashicorp/terraform-provider-azurerm/helpers/tf"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/validate"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/validation"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/timeouts"
-	"github.com/hashicorp/terraform-provider-azurerm/utils"
 )
 
 func resourceCosmosDbSQLTrigger() *pluginsdk.Resource {
@@ -34,7 +34,7 @@ func resourceCosmosDbSQLTrigger() *pluginsdk.Resource {
 		},
 
 		Importer: pluginsdk.ImporterValidatingResourceId(func(id string) error {
-			_, err := parse.SqlTriggerID(id)
+			_, err := cosmosdb.ParseTriggerID(id)
 			return err
 		}),
 
@@ -60,24 +60,15 @@ func resourceCosmosDbSQLTrigger() *pluginsdk.Resource {
 			},
 
 			"operation": {
-				Type:     pluginsdk.TypeString,
-				Required: true,
-				ValidateFunc: validation.StringInSlice([]string{
-					string(documentdb.TriggerOperationAll),
-					string(documentdb.TriggerOperationCreate),
-					string(documentdb.TriggerOperationUpdate),
-					string(documentdb.TriggerOperationDelete),
-					string(documentdb.TriggerOperationReplace),
-				}, false),
+				Type:         pluginsdk.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringInSlice(cosmosdb.PossibleValuesForTriggerOperation(), false),
 			},
 
 			"type": {
-				Type:     pluginsdk.TypeString,
-				Required: true,
-				ValidateFunc: validation.StringInSlice([]string{
-					string(documentdb.TriggerTypePre),
-					string(documentdb.TriggerTypePost),
-				}, false),
+				Type:         pluginsdk.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringInSlice(cosmosdb.PossibleValuesForTriggerType(), false),
 			},
 		},
 	}
@@ -85,47 +76,47 @@ func resourceCosmosDbSQLTrigger() *pluginsdk.Resource {
 
 func resourceCosmosDbSQLTriggerCreateUpdate(d *pluginsdk.ResourceData, meta interface{}) error {
 	subscriptionId := meta.(*clients.Client).Account.SubscriptionId
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.CosmosDBClient
 	ctx, cancel := timeouts.ForCreateUpdate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
 	name := d.Get("name").(string)
-	containerId, _ := parse.SqlContainerID(d.Get("container_id").(string))
+	containerId, _ := cosmosdb.ParseContainerID(d.Get("container_id").(string))
 	body := d.Get("body").(string)
 	triggerOperation := d.Get("operation").(string)
 	triggerType := d.Get("type").(string)
 
-	id := parse.NewSqlTriggerID(subscriptionId, containerId.ResourceGroup, containerId.DatabaseAccountName, containerId.SqlDatabaseName, containerId.ContainerName, name)
+	id := cosmosdb.NewTriggerID(subscriptionId, containerId.ResourceGroupName, containerId.DatabaseAccountName, containerId.SqlDatabaseName, containerId.ContainerName, name)
 
 	if d.IsNewResource() {
-		existing, err := client.GetSQLTrigger(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.TriggerName)
+		existing, err := client.SqlResourcesGetSqlTrigger(ctx, id)
 		if err != nil {
-			if !utils.ResponseWasNotFound(existing.Response) {
+			if !response.WasNotFound(existing.HttpResponse) {
 				return fmt.Errorf("checking for existing CosmosDb SQLTrigger %q: %+v", id, err)
 			}
 		}
-		if !utils.ResponseWasNotFound(existing.Response) {
+		if !response.WasNotFound(existing.HttpResponse) {
 			return tf.ImportAsExistsError("azurerm_cosmosdb_sql_trigger", id.ID())
 		}
 	}
 
-	createUpdateSqlTriggerParameters := documentdb.SQLTriggerCreateUpdateParameters{
-		SQLTriggerCreateUpdateProperties: &documentdb.SQLTriggerCreateUpdateProperties{
-			Resource: &documentdb.SQLTriggerResource{
-				ID:               &name,
+	createUpdateSqlTriggerParameters := cosmosdb.SqlTriggerCreateUpdateParameters{
+		Properties: cosmosdb.SqlTriggerCreateUpdateProperties{
+			Resource: cosmosdb.SqlTriggerResource{
+				Id:               name,
 				Body:             &body,
-				TriggerType:      documentdb.TriggerType(triggerType),
-				TriggerOperation: documentdb.TriggerOperation(triggerOperation),
+				TriggerType:      pointer.To(cosmosdb.TriggerType(triggerType)),
+				TriggerOperation: pointer.To(cosmosdb.TriggerOperation(triggerOperation)),
 			},
-			Options: &documentdb.CreateUpdateOptions{},
+			Options: &cosmosdb.CreateUpdateOptions{},
 		},
 	}
-	future, err := client.CreateUpdateSQLTrigger(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, name, createUpdateSqlTriggerParameters)
+	future, err := client.SqlResourcesCreateUpdateSqlTrigger(ctx, id, createUpdateSqlTriggerParameters)
 	if err != nil {
 		return fmt.Errorf("creating/updating CosmosDb SQLTrigger %q: %+v", id, err)
 	}
 
-	if err := future.WaitForCompletionRef(ctx, client.Client); err != nil {
+	if err := future.Poller.PollUntilDone(); err != nil {
 		return fmt.Errorf("waiting for creation/update of the CosmosDb SQLTrigger %q: %+v", id, err)
 	}
 
@@ -134,28 +125,28 @@ func resourceCosmosDbSQLTriggerCreateUpdate(d *pluginsdk.ResourceData, meta inte
 }
 
 func resourceCosmosDbSQLTriggerRead(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.CosmosDBClient
 	ctx, cancel := timeouts.ForRead(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id, err := parse.SqlTriggerID(d.Id())
+	id, err := cosmosdb.ParseTriggerID(d.Id())
 	if err != nil {
 		return err
 	}
 
-	resp, err := client.GetSQLTrigger(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.TriggerName)
+	resp, err := client.SqlResourcesGetSqlTrigger(ctx, *id)
 	if err != nil {
-		if utils.ResponseWasNotFound(resp.Response) {
+		if response.WasNotFound(resp.HttpResponse) {
 			log.Printf("[INFO] CosmosDb SQLTrigger %q does not exist - removing from state", d.Id())
 			d.SetId("")
 			return nil
 		}
 		return fmt.Errorf("retrieving CosmosDb SQLTrigger %q: %+v", id, err)
 	}
-	containerId := parse.NewSqlContainerID(id.SubscriptionId, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName)
+	containerId := cosmosdb.NewContainerID(id.SubscriptionId, id.ResourceGroupName, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName)
 	d.Set("name", id.TriggerName)
 	d.Set("container_id", containerId.ID())
-	if props := resp.SQLTriggerGetProperties; props != nil {
+	if props := resp.Model.Properties; props != nil {
 		if props.Resource != nil {
 			d.Set("body", props.Resource.Body)
 			d.Set("operation", props.Resource.TriggerOperation)
@@ -166,21 +157,21 @@ func resourceCosmosDbSQLTriggerRead(d *pluginsdk.ResourceData, meta interface{})
 }
 
 func resourceCosmosDbSQLTriggerDelete(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.CosmosDBClient
 	ctx, cancel := timeouts.ForDelete(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id, err := parse.SqlTriggerID(d.Id())
+	id, err := cosmosdb.ParseTriggerID(d.Id())
 	if err != nil {
 		return err
 	}
 
-	future, err := client.DeleteSQLTrigger(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.TriggerName)
+	future, err := client.SqlResourcesDeleteSqlTrigger(ctx, *id)
 	if err != nil {
 		return fmt.Errorf("deleting CosmosDb SQLResourcesSQLTrigger %q: %+v", id, err)
 	}
 
-	if err := future.WaitForCompletionRef(ctx, client.Client); err != nil {
+	if err := future.Poller.PollUntilDone(); err != nil {
 		return fmt.Errorf("waiting for deletion of the CosmosDb SQLResourcesSQLTrigger %q: %+v", id, err)
 	}
 	return nil

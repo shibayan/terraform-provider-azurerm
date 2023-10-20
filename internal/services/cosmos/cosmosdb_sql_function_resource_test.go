@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/cosmos-db/mgmt/2021-10-15/documentdb" // nolint: staticcheck
+	"github.com/hashicorp/go-azure-helpers/lang/pointer"
+	"github.com/hashicorp/go-azure-helpers/lang/response"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/cosmosdb"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/check"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
-	"github.com/hashicorp/terraform-provider-azurerm/utils"
 )
 
 type CosmosDbSQLFunctionResource struct{}
@@ -76,18 +76,18 @@ func TestAccCosmosDbSQLFunction_update(t *testing.T) {
 }
 
 func (r CosmosDbSQLFunctionResource) Exists(ctx context.Context, client *clients.Client, state *pluginsdk.InstanceState) (*bool, error) {
-	id, err := parse.SqlFunctionID(state.ID)
+	id, err := cosmosdb.ParseUserDefinedFunctionID(state.ID)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Cosmos.SqlResourceClient.GetSQLUserDefinedFunction(ctx, id.ResourceGroup, id.DatabaseAccountName, id.SqlDatabaseName, id.ContainerName, id.UserDefinedFunctionName)
+	resp, err := client.Cosmos.CosmosDBClient.SqlResourcesGetSqlUserDefinedFunction(ctx, *id)
 	if err != nil {
-		if utils.ResponseWasNotFound(resp.Response) {
-			return utils.Bool(false), nil
+		if response.WasNotFound(resp.HttpResponse) {
+			return pointer.FromBool(false), nil
 		}
 		return nil, fmt.Errorf("retrieving CosmosDb SQLFunction %q: %+v", id, err)
 	}
-	return utils.Bool(true), nil
+	return pointer.FromBool(true), nil
 }
 
 func (r CosmosDbSQLFunctionResource) template(data acceptance.TestData) string {
@@ -131,7 +131,7 @@ resource "azurerm_cosmosdb_sql_container" "test" {
   database_name       = azurerm_cosmosdb_sql_database.test.name
   partition_key_path  = "/definition/id"
 }
-	`, data.Locations.Primary, data.RandomInteger, string(documentdb.DatabaseAccountKindGlobalDocumentDB), string(documentdb.DefaultConsistencyLevelSession))
+	`, data.Locations.Primary, data.RandomInteger, string(cosmosdb.DatabaseAccountKindGlobalDocumentDB), string(cosmosdb.DefaultConsistencyLevelSession))
 }
 
 func (r CosmosDbSQLFunctionResource) basic(data acceptance.TestData) string {

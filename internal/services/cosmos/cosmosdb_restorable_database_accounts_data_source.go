@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/cosmos-db/mgmt/2021-10-15/documentdb" // nolint: staticcheck
+	"github.com/hashicorp/go-azure-helpers/lang/response"
 	"github.com/hashicorp/go-azure-helpers/resourcemanager/commonschema"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/restorables"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/validate"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/timeouts"
-	"github.com/hashicorp/terraform-provider-azurerm/utils"
 )
 
 func dataSourceCosmosDbRestorableDatabaseAccounts() *pluginsdk.Resource {
@@ -94,18 +93,21 @@ func dataSourceCosmosDbRestorableDatabaseAccounts() *pluginsdk.Resource {
 }
 
 func dataSourceCosmosDbRestorableDatabaseAccountsRead(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.RestorableDatabaseAccountsClient
+	client := meta.(*clients.Client).Cosmos.RestorablesClient
 	subscriptionId := meta.(*clients.Client).Account.SubscriptionId
 	ctx, cancel := timeouts.ForRead(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id := parse.NewRestorableDatabaseAccountID(subscriptionId, d.Get("location").(string), "read")
+	id := restorables.NewRestorableDatabaseAccountID(subscriptionId, d.Get("location").(string), "read")
 
 	name := d.Get("name").(string)
 	location := d.Get("location").(string)
-	resp, err := client.ListByLocation(ctx, location)
+
+	locationId := restorables.NewLocationID(subscriptionId, location)
+
+	resp, err := client.RestorableDatabaseAccountsListByLocation(ctx, locationId)
 	if err != nil {
-		if utils.ResponseWasNotFound(resp.Response) {
+		if response.WasNotFound(resp.HttpResponse) {
 			return fmt.Errorf("%s was not found", id)
 		}
 		return fmt.Errorf("retrieving %s: %+v", id, err)
@@ -113,7 +115,7 @@ func dataSourceCosmosDbRestorableDatabaseAccountsRead(d *pluginsdk.ResourceData,
 
 	d.Set("location", location)
 
-	if props := resp.Value; props != nil {
+	if props := resp.Model.Value; props != nil {
 		if err := d.Set("accounts", flattenCosmosDbRestorableDatabaseAccounts(props, name)); err != nil {
 			return fmt.Errorf("flattening `accounts`: %+v", err)
 		}
@@ -124,7 +126,7 @@ func dataSourceCosmosDbRestorableDatabaseAccountsRead(d *pluginsdk.ResourceData,
 	return nil
 }
 
-func flattenCosmosDbRestorableDatabaseAccounts(input *[]documentdb.RestorableDatabaseAccountGetResult, accountName string) []interface{} {
+func flattenCosmosDbRestorableDatabaseAccounts(input *[]restorables.RestorableDatabaseAccountGetResult, accountName string) []interface{} {
 	result := make([]interface{}, 0)
 
 	if len(*input) == 0 {
@@ -132,24 +134,24 @@ func flattenCosmosDbRestorableDatabaseAccounts(input *[]documentdb.RestorableDat
 	}
 
 	for _, item := range *input {
-		if props := item.RestorableDatabaseAccountProperties; props != nil && props.AccountName != nil && *props.AccountName == accountName {
+		if props := item.Properties; props != nil && props.AccountName != nil && *props.AccountName == accountName {
 			var id, creationTime, deletionTime string
-			var apiType documentdb.APIType
+			var apiType restorables.ApiType
 
-			if item.ID != nil {
-				id = *item.ID
+			if item.Id != nil {
+				id = *item.Id
 			}
 
-			if props.APIType != "" {
-				apiType = props.APIType
+			if props.ApiType != nil {
+				apiType = *props.ApiType
 			}
 
 			if props.CreationTime != nil {
-				creationTime = props.CreationTime.Format(time.RFC3339)
+				creationTime = *props.CreationTime
 			}
 
 			if props.DeletionTime != nil {
-				deletionTime = props.DeletionTime.Format(time.RFC3339)
+				deletionTime = *props.DeletionTime
 			}
 
 			result = append(result, map[string]interface{}{
@@ -165,7 +167,7 @@ func flattenCosmosDbRestorableDatabaseAccounts(input *[]documentdb.RestorableDat
 	return result
 }
 
-func flattenCosmosDbRestorableDatabaseAccountsRestorableLocations(input *[]documentdb.RestorableLocationResource) []interface{} {
+func flattenCosmosDbRestorableDatabaseAccountsRestorableLocations(input *[]restorables.RestorableLocationResource) []interface{} {
 	result := make([]interface{}, 0)
 
 	if len(*input) == 0 {
@@ -179,16 +181,16 @@ func flattenCosmosDbRestorableDatabaseAccountsRestorableLocations(input *[]docum
 			location = *item.LocationName
 		}
 
-		if item.RegionalDatabaseAccountInstanceID != nil {
-			regionalDatabaseAccountInstanceId = *item.RegionalDatabaseAccountInstanceID
+		if item.RegionalDatabaseAccountInstanceId != nil {
+			regionalDatabaseAccountInstanceId = *item.RegionalDatabaseAccountInstanceId
 		}
 
 		if item.CreationTime != nil {
-			creationTime = item.CreationTime.Format(time.RFC3339)
+			creationTime = *item.CreationTime
 		}
 
 		if item.DeletionTime != nil {
-			deletionTime = item.DeletionTime.Format(time.RFC3339)
+			deletionTime = *item.DeletionTime
 		}
 
 		result = append(result, map[string]interface{}{

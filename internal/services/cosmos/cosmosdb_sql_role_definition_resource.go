@@ -8,13 +8,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/cosmos-db/mgmt/2021-10-15/documentdb" // nolint: staticcheck
+	"github.com/hashicorp/go-azure-helpers/lang/pointer"
+	"github.com/hashicorp/go-azure-helpers/lang/response"
 	"github.com/hashicorp/go-azure-helpers/resourcemanager/commonschema"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/cosmosdb/2023-04-15/rbacs"
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/terraform-provider-azurerm/helpers/tf"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/locks"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/validate"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/validation"
@@ -37,7 +38,7 @@ func resourceCosmosDbSQLRoleDefinition() *pluginsdk.Resource {
 		},
 
 		Importer: pluginsdk.ImporterValidatingResourceId(func(id string) error {
-			_, err := parse.SqlRoleDefinitionID(id)
+			_, err := rbacs.ParseSqlRoleDefinitionID(id)
 			return err
 		}),
 
@@ -60,14 +61,11 @@ func resourceCosmosDbSQLRoleDefinition() *pluginsdk.Resource {
 			},
 
 			"type": {
-				Type:     pluginsdk.TypeString,
-				Optional: true,
-				ForceNew: true,
-				Default:  string(documentdb.RoleDefinitionTypeCustomRole),
-				ValidateFunc: validation.StringInSlice([]string{
-					string(documentdb.RoleDefinitionTypeBuiltInRole),
-					string(documentdb.RoleDefinitionTypeCustomRole),
-				}, false),
+				Type:         pluginsdk.TypeString,
+				Optional:     true,
+				ForceNew:     true,
+				Default:      string(rbacs.RoleDefinitionTypeCustomRole),
+				ValidateFunc: validation.StringInSlice(rbacs.PossibleValuesForRoleDefinitionType(), false),
 			},
 
 			"assignable_scopes": {
@@ -107,7 +105,7 @@ func resourceCosmosDbSQLRoleDefinition() *pluginsdk.Resource {
 
 func resourceCosmosDbSQLRoleDefinitionCreate(d *pluginsdk.ResourceData, meta interface{}) error {
 	subscriptionId := meta.(*clients.Client).Account.SubscriptionId
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.RbacsClient
 	ctx, cancel := timeouts.ForCreate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
@@ -124,36 +122,36 @@ func resourceCosmosDbSQLRoleDefinitionCreate(d *pluginsdk.ResourceData, meta int
 	resourceGroup := d.Get("resource_group_name").(string)
 	accountName := d.Get("account_name").(string)
 
-	id := parse.NewSqlRoleDefinitionID(subscriptionId, resourceGroup, accountName, roleDefinitionId)
+	id := rbacs.NewSqlRoleDefinitionID(subscriptionId, resourceGroup, accountName, roleDefinitionId)
 
 	locks.ByName(id.DatabaseAccountName, CosmosDbAccountResourceName)
 	defer locks.UnlockByName(id.DatabaseAccountName, CosmosDbAccountResourceName)
 
-	existing, err := client.GetSQLRoleDefinition(ctx, id.Name, id.ResourceGroup, id.DatabaseAccountName)
+	existing, err := client.SqlResourcesGetSqlRoleDefinition(ctx, id)
 	if err != nil {
-		if !utils.ResponseWasNotFound(existing.Response) {
+		if !response.WasNotFound(existing.HttpResponse) {
 			return fmt.Errorf("checking for presence of existing %s: %+v", id, err)
 		}
 	}
-	if !utils.ResponseWasNotFound(existing.Response) {
+	if !response.WasNotFound(existing.HttpResponse) {
 		return tf.ImportAsExistsError("azurerm_cosmosdb_sql_role_definition", id.ID())
 	}
 
-	parameters := documentdb.SQLRoleDefinitionCreateUpdateParameters{
-		SQLRoleDefinitionResource: &documentdb.SQLRoleDefinitionResource{
-			RoleName:         utils.String(d.Get("name").(string)),
+	parameters := rbacs.SqlRoleDefinitionCreateUpdateParameters{
+		Properties: &rbacs.SqlRoleDefinitionResource{
+			RoleName:         pointer.FromString(d.Get("name").(string)),
 			AssignableScopes: utils.ExpandStringSlice(d.Get("assignable_scopes").(*pluginsdk.Set).List()),
 			Permissions:      expandSqlRoleDefinitionPermissions(d.Get("permissions").(*pluginsdk.Set).List()),
-			Type:             documentdb.RoleDefinitionType(d.Get("type").(string)),
+			Type:             pointer.To(rbacs.RoleDefinitionType(d.Get("type").(string))),
 		},
 	}
 
-	future, err := client.CreateUpdateSQLRoleDefinition(ctx, id.Name, id.ResourceGroup, id.DatabaseAccountName, parameters)
+	future, err := client.SqlResourcesCreateUpdateSqlRoleDefinition(ctx, id, parameters)
 	if err != nil {
 		return fmt.Errorf("creating %s: %+v", id, err)
 	}
 
-	if err := future.WaitForCompletionRef(ctx, client.Client); err != nil {
+	if err := future.Poller.PollUntilDone(); err != nil {
 		return fmt.Errorf("waiting for creation of %s: %+v", id, err)
 	}
 
@@ -163,18 +161,18 @@ func resourceCosmosDbSQLRoleDefinitionCreate(d *pluginsdk.ResourceData, meta int
 }
 
 func resourceCosmosDbSQLRoleDefinitionRead(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.RbacsClient
 	ctx, cancel := timeouts.ForRead(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id, err := parse.SqlRoleDefinitionID(d.Id())
+	id, err := rbacs.ParseSqlRoleDefinitionID(d.Id())
 	if err != nil {
 		return err
 	}
 
-	resp, err := client.GetSQLRoleDefinition(ctx, id.Name, id.ResourceGroup, id.DatabaseAccountName)
+	resp, err := client.SqlResourcesGetSqlRoleDefinition(ctx, *id)
 	if err != nil {
-		if utils.ResponseWasNotFound(resp.Response) {
+		if response.WasNotFound(resp.HttpResponse) {
 			log.Printf("[DEBUG] %s was not found - removing from state", *id)
 			d.SetId("")
 			return nil
@@ -182,11 +180,11 @@ func resourceCosmosDbSQLRoleDefinitionRead(d *pluginsdk.ResourceData, meta inter
 		return fmt.Errorf("retrieving %s: %+v", *id, err)
 	}
 
-	d.Set("role_definition_id", id.Name)
-	d.Set("resource_group_name", id.ResourceGroup)
+	d.Set("role_definition_id", id.RoleDefinitionId)
+	d.Set("resource_group_name", id.ResourceGroupName)
 	d.Set("account_name", id.DatabaseAccountName)
 
-	if props := resp.SQLRoleDefinitionResource; props != nil {
+	if props := resp.Model.Properties; props != nil {
 		d.Set("assignable_scopes", utils.FlattenStringSlice(props.AssignableScopes))
 		d.Set("name", props.RoleName)
 		d.Set("type", props.Type)
@@ -200,11 +198,11 @@ func resourceCosmosDbSQLRoleDefinitionRead(d *pluginsdk.ResourceData, meta inter
 }
 
 func resourceCosmosDbSQLRoleDefinitionUpdate(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.RbacsClient
 	ctx, cancel := timeouts.ForUpdate(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id, err := parse.SqlRoleDefinitionID(d.Id())
+	id, err := rbacs.ParseSqlRoleDefinitionID(d.Id())
 	if err != nil {
 		return err
 	}
@@ -212,21 +210,21 @@ func resourceCosmosDbSQLRoleDefinitionUpdate(d *pluginsdk.ResourceData, meta int
 	locks.ByName(id.DatabaseAccountName, CosmosDbAccountResourceName)
 	defer locks.UnlockByName(id.DatabaseAccountName, CosmosDbAccountResourceName)
 
-	parameters := documentdb.SQLRoleDefinitionCreateUpdateParameters{
-		SQLRoleDefinitionResource: &documentdb.SQLRoleDefinitionResource{
-			RoleName:         utils.String(d.Get("name").(string)),
+	parameters := rbacs.SqlRoleDefinitionCreateUpdateParameters{
+		Properties: &rbacs.SqlRoleDefinitionResource{
+			RoleName:         pointer.FromString(d.Get("name").(string)),
 			AssignableScopes: utils.ExpandStringSlice(d.Get("assignable_scopes").(*pluginsdk.Set).List()),
 			Permissions:      expandSqlRoleDefinitionPermissions(d.Get("permissions").(*pluginsdk.Set).List()),
-			Type:             documentdb.RoleDefinitionType(d.Get("type").(string)),
+			Type:             pointer.To(rbacs.RoleDefinitionType(d.Get("type").(string))),
 		},
 	}
 
-	future, err := client.CreateUpdateSQLRoleDefinition(ctx, id.Name, id.ResourceGroup, id.DatabaseAccountName, parameters)
+	future, err := client.SqlResourcesCreateUpdateSqlRoleDefinition(ctx, *id, parameters)
 	if err != nil {
 		return fmt.Errorf("updating %s: %+v", id, err)
 	}
 
-	if err := future.WaitForCompletionRef(ctx, client.Client); err != nil {
+	if err := future.Poller.PollUntilDone(); err != nil {
 		return fmt.Errorf("waiting for update of %s: %+v", id, err)
 	}
 
@@ -236,11 +234,11 @@ func resourceCosmosDbSQLRoleDefinitionUpdate(d *pluginsdk.ResourceData, meta int
 }
 
 func resourceCosmosDbSQLRoleDefinitionDelete(d *pluginsdk.ResourceData, meta interface{}) error {
-	client := meta.(*clients.Client).Cosmos.SqlResourceClient
+	client := meta.(*clients.Client).Cosmos.RbacsClient
 	ctx, cancel := timeouts.ForDelete(meta.(*clients.Client).StopContext, d)
 	defer cancel()
 
-	id, err := parse.SqlRoleDefinitionID(d.Id())
+	id, err := rbacs.ParseSqlRoleDefinitionID(d.Id())
 	if err != nil {
 		return err
 	}
@@ -248,25 +246,25 @@ func resourceCosmosDbSQLRoleDefinitionDelete(d *pluginsdk.ResourceData, meta int
 	locks.ByName(id.DatabaseAccountName, CosmosDbAccountResourceName)
 	defer locks.UnlockByName(id.DatabaseAccountName, CosmosDbAccountResourceName)
 
-	future, err := client.DeleteSQLRoleDefinition(ctx, id.Name, id.ResourceGroup, id.DatabaseAccountName)
+	future, err := client.SqlResourcesDeleteSqlRoleDefinition(ctx, *id)
 	if err != nil {
 		return fmt.Errorf("deleting %s: %+v", *id, err)
 	}
 
-	if err := future.WaitForCompletionRef(ctx, client.Client); err != nil {
+	if err := future.Poller.PollUntilDone(); err != nil {
 		return fmt.Errorf("waiting for deletion of %s: %+v", *id, err)
 	}
 
 	return nil
 }
 
-func expandSqlRoleDefinitionPermissions(input []interface{}) *[]documentdb.Permission {
-	results := make([]documentdb.Permission, 0)
+func expandSqlRoleDefinitionPermissions(input []interface{}) *[]rbacs.Permission {
+	results := make([]rbacs.Permission, 0)
 
 	for _, item := range input {
 		v := item.(map[string]interface{})
 
-		results = append(results, documentdb.Permission{
+		results = append(results, rbacs.Permission{
 			DataActions: utils.ExpandStringSlice(v["data_actions"].(*pluginsdk.Set).List()),
 		})
 	}
@@ -274,7 +272,7 @@ func expandSqlRoleDefinitionPermissions(input []interface{}) *[]documentdb.Permi
 	return &results
 }
 
-func flattenSqlRoleDefinitionPermissions(input *[]documentdb.Permission) []interface{} {
+func flattenSqlRoleDefinitionPermissions(input *[]rbacs.Permission) []interface{} {
 	results := make([]interface{}, 0)
 	if input == nil {
 		return results
