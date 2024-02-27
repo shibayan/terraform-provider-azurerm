@@ -12,7 +12,9 @@ import (
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/check"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
+	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
+	"github.com/hashicorp/terraform-provider-azurerm/utils"
 )
 
 type CosmosSqlDatabaseResource struct{}
@@ -104,17 +106,17 @@ func TestAccCosmosDbSqlDatabase_serverless(t *testing.T) {
 }
 
 func (t CosmosSqlDatabaseResource) Exists(ctx context.Context, clients *clients.Client, state *pluginsdk.InstanceState) (*bool, error) {
-	id, err := cosmosdb.ParseSqlDatabaseID(state.ID)
+	id, err := parse.SqlDatabaseID(state.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := clients.Cosmos.CosmosDBClient.SqlResourcesGetSqlDatabase(ctx, *id)
+	resp, err := clients.Cosmos.SqlClient.GetSQLDatabase(ctx, id.ResourceGroup, id.DatabaseAccountName, id.Name)
 	if err != nil {
 		return nil, fmt.Errorf("reading Cosmos SQL Database (%s): %+v", id.String(), err)
 	}
 
-	return pointer.FromBool(resp.Model.Id != nil), nil
+	return utils.Bool(resp.ID != nil), nil
 }
 
 func (CosmosSqlDatabaseResource) basic(data acceptance.TestData) string {

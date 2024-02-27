@@ -16,7 +16,9 @@ import (
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/check"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/features"
+	"github.com/hashicorp/terraform-provider-azurerm/internal/services/cosmos/parse"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
+	"github.com/hashicorp/terraform-provider-azurerm/utils"
 )
 
 type CosmosDBAccountResource struct{}
@@ -1370,17 +1372,17 @@ func TestAccCosmosDBAccount_withoutMaxAgeInSeconds(t *testing.T) {
 }
 
 func (t CosmosDBAccountResource) Exists(ctx context.Context, clients *clients.Client, state *pluginsdk.InstanceState) (*bool, error) {
-	id, err := cosmosdb.ParseDatabaseAccountID(state.ID)
+	id, err := parse.DatabaseAccountID(state.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := clients.Cosmos.CosmosDBClient.DatabaseAccountsGet(ctx, *id)
+	resp, err := clients.Cosmos.DatabaseClient.Get(ctx, id.ResourceGroup, id.Name)
 	if err != nil {
 		return nil, fmt.Errorf("reading Cosmos Database (%s): %+v", id.String(), err)
 	}
 
-	return pointer.FromBool(resp.Model.Id != nil), nil
+	return utils.Bool(resp.ID != nil), nil
 }
 
 func (CosmosDBAccountResource) basic(data acceptance.TestData, kind cosmosdb.DatabaseAccountKind, consistency cosmosdb.DefaultConsistencyLevel) string {
