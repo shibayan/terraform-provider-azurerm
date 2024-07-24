@@ -265,6 +265,10 @@ resource "azurerm_key_vault" "test" {
   tenant_id                = data.azurerm_client_config.current.tenant_id
   sku_name                 = "standard"
   purge_protection_enabled = true
+
+  lifecycle {
+    ignore_changes = [access_policy]
+  }
 }
 
 resource "azurerm_key_vault_access_policy" "cluster" {
@@ -272,7 +276,7 @@ resource "azurerm_key_vault_access_policy" "cluster" {
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_user_assigned_identity.test.principal_id
 
-  key_permissions = ["Get", "UnwrapKey", "WrapKey"]
+  key_permissions = ["Get", "UnwrapKey", "WrapKey", "GetRotationPolicy"]
 }
 
 resource "azurerm_key_vault_access_policy" "client" {
@@ -338,6 +342,10 @@ resource "azurerm_key_vault" "test" {
   tenant_id                = data.azurerm_client_config.current.tenant_id
   sku_name                 = "standard"
   purge_protection_enabled = true
+
+  lifecycle {
+    ignore_changes = [access_policy]
+  }
 }
 
 resource "azurerm_key_vault_access_policy" "cluster" {

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/go-azure-sdk/resource-manager/network/2023-06-01/routes"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/network/2023-11-01/routes"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/check"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
@@ -158,6 +158,10 @@ resource "azurerm_route_table" "test" {
   name                = "acctestrt%d"
   location            = azurerm_resource_group.test.location
   resource_group_name = azurerm_resource_group.test.name
+
+  lifecycle {
+    ignore_changes = [route]
+  }
 }
 
 resource "azurerm_route" "test" {
@@ -200,6 +204,10 @@ resource "azurerm_route_table" "test" {
   name                = "acctestrt%d"
   location            = azurerm_resource_group.test.location
   resource_group_name = azurerm_resource_group.test.name
+
+  lifecycle {
+    ignore_changes = [route]
+  }
 }
 
 resource "azurerm_route" "test" {
@@ -229,6 +237,10 @@ resource "azurerm_route_table" "test" {
   name                = "acctestrt%d"
   location            = azurerm_resource_group.test.location
   resource_group_name = azurerm_resource_group.test.name
+
+  lifecycle {
+    ignore_changes = [route]
+  }
 }
 
 resource "azurerm_route" "test" {

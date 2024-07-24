@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/go-azure-helpers/lang/pointer"
 	"github.com/hashicorp/go-azure-helpers/lang/response"
 	"github.com/hashicorp/go-azure-helpers/resourcemanager/commonids"
-	"github.com/hashicorp/go-azure-sdk/resource-manager/network/2023-06-01/loadbalancers"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/network/2023-09-01/loadbalancers"
 	"github.com/hashicorp/terraform-provider-azurerm/helpers/tf"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/locks"
@@ -59,6 +59,14 @@ func resourceArmLoadBalancerBackendAddressPool() *pluginsdk.Resource {
 				Required:     true,
 				ForceNew:     true,
 				ValidateFunc: loadbalancers.ValidateLoadBalancerID,
+			},
+
+			"synchronous_mode": {
+				Type:         pluginsdk.TypeString,
+				Optional:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.StringInSlice(loadbalancers.PossibleValuesForSyncMode(), false),
+				RequiredWith: []string{"virtual_network_id"},
 			},
 
 			"tunnel_interface": {
@@ -212,11 +220,25 @@ func resourceArmLoadBalancerBackendAddressPoolCreateUpdate(d *pluginsdk.Resource
 		return fmt.Errorf("`tunnel_interface` is required for %q when sku is set to %s", id, *sku.Name)
 	}
 
+	if _, ok := d.GetOk("synchronous_mode"); ok && *sku.Name != loadbalancers.LoadBalancerSkuNameStandard {
+		return fmt.Errorf("`synchronous_mode` can set only for Load Balancer with `Standard` SKU")
+	}
+
 	if v, ok := d.GetOk("virtual_network_id"); ok {
 		param.Properties = &loadbalancers.BackendAddressPoolPropertiesFormat{
 			VirtualNetwork: &loadbalancers.SubResource{
 				Id: pointer.To(v.(string)),
 			}}
+	}
+
+	if v, ok := d.GetOk("synchronous_mode"); ok {
+		if param.Properties == nil {
+			param.Properties = &loadbalancers.BackendAddressPoolPropertiesFormat{
+				SyncMode: pointer.To(loadbalancers.SyncMode(v.(string))),
+			}
+		} else {
+			param.Properties.SyncMode = pointer.To(loadbalancers.SyncMode(v.(string)))
+		}
 	}
 
 	if properties := lb.Model.Properties; properties != nil {
@@ -312,6 +334,8 @@ func resourceArmLoadBalancerBackendAddressPoolRead(d *pluginsdk.ResourceData, me
 			if err := d.Set("backend_ip_configurations", backendIPConfigurations); err != nil {
 				return fmt.Errorf("setting `backend_ip_configurations`: %v", err)
 			}
+
+			d.Set("synchronous_mode", pointer.From(properties.SyncMode))
 
 			network := ""
 			if vnet := properties.VirtualNetwork; vnet != nil && vnet.Id != nil {

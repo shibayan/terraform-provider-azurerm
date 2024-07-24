@@ -154,7 +154,7 @@ resource "azurerm_virtual_network" "test" {
   location            = azurerm_resource_group.test.location
   resource_group_name = azurerm_resource_group.test.name
   lifecycle {
-    ignore_changes = [ddos_protection_plan]
+    ignore_changes = [ddos_protection_plan, subnet]
   }
 }
 
@@ -218,6 +218,10 @@ func (AppServiceVirtualNetworkSwiftConnectionResource) basic(data acceptance.Tes
 resource "azurerm_app_service_virtual_network_swift_connection" "test" {
   app_service_id = azurerm_app_service.test.id
   subnet_id      = azurerm_subnet.test1.id
+
+  depends_on = [
+    azurerm_subnet.test2
+  ]
 }
 `, template)
 }
@@ -263,7 +267,7 @@ resource "azurerm_virtual_network" "test" {
   location            = azurerm_resource_group.test.location
   resource_group_name = azurerm_resource_group.test.name
   lifecycle {
-    ignore_changes = [ddos_protection_plan]
+    ignore_changes = [ddos_protection_plan, subnet]
   }
 }
 

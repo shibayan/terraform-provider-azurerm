@@ -6,27 +6,28 @@ package client
 import (
 	"fmt"
 
+	"github.com/hashicorp/go-azure-sdk/resource-manager/web/2023-01-01/appserviceenvironments"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/web/2023-01-01/appserviceplans"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/web/2023-01-01/resourceproviders"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/web/2023-01-01/staticsites"
 	"github.com/hashicorp/go-azure-sdk/resource-manager/web/2023-01-01/webapps"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/common"
-	"github.com/tombuildsstuff/kermit/sdk/web/2022-09-01/web"
 )
 
 type Client struct {
-	AppServiceEnvironmentClient *web.AppServiceEnvironmentsClient
-	BaseClient                  *web.BaseClient
+	AppServiceEnvironmentClient *appserviceenvironments.AppServiceEnvironmentsClient
 	ResourceProvidersClient     *resourceproviders.ResourceProvidersClient
 	ServicePlanClient           *appserviceplans.AppServicePlansClient
+	StaticSitesClient           *staticsites.StaticSitesClient
 	WebAppsClient               *webapps.WebAppsClient
 }
 
 func NewClient(o *common.ClientOptions) (*Client, error) {
-	appServiceEnvironmentClient := web.NewAppServiceEnvironmentsClientWithBaseURI(o.ResourceManagerEndpoint, o.SubscriptionId)
-	o.ConfigureClient(&appServiceEnvironmentClient.Client, o.ResourceManagerAuthorizer)
-
-	baseClient := web.NewWithBaseURI(o.ResourceManagerEndpoint, o.SubscriptionId)
-	o.ConfigureClient(&baseClient.Client, o.ResourceManagerAuthorizer)
+	appServiceEnvironmentClient, err := appserviceenvironments.NewAppServiceEnvironmentsClientWithBaseURI(o.Environment.ResourceManager)
+	if err != nil {
+		return nil, fmt.Errorf("building AppServiceEnvironments client: %+v", err)
+	}
+	o.Configure(appServiceEnvironmentClient.Client, o.Authorizers.ResourceManager)
 
 	webAppServiceClient, err := webapps.NewWebAppsClientWithBaseURI(o.Environment.ResourceManager)
 	if err != nil {
@@ -40,6 +41,12 @@ func NewClient(o *common.ClientOptions) (*Client, error) {
 	}
 	o.Configure(resourceProvidersClient.Client, o.Authorizers.ResourceManager)
 
+	staticSitesClient, err := staticsites.NewStaticSitesClientWithBaseURI(o.Environment.ResourceManager)
+	if err != nil {
+		return nil, fmt.Errorf("building StaticSites client: %+v", err)
+	}
+	o.Configure(staticSitesClient.Client, o.Authorizers.ResourceManager)
+
 	servicePlanClient, err := appserviceplans.NewAppServicePlansClientWithBaseURI(o.Environment.ResourceManager)
 	if err != nil {
 		return nil, fmt.Errorf("building ServicePlan client: %+v", err)
@@ -47,10 +54,10 @@ func NewClient(o *common.ClientOptions) (*Client, error) {
 	o.Configure(servicePlanClient.Client, o.Authorizers.ResourceManager)
 
 	return &Client{
-		AppServiceEnvironmentClient: &appServiceEnvironmentClient,
-		BaseClient:                  &baseClient,
+		AppServiceEnvironmentClient: appServiceEnvironmentClient,
 		ResourceProvidersClient:     resourceProvidersClient,
 		ServicePlanClient:           servicePlanClient,
+		StaticSitesClient:           staticSitesClient,
 		WebAppsClient:               webAppServiceClient,
 	}, nil
 }

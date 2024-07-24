@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/go-azure-helpers/lang/pointer"
-	"github.com/hashicorp/go-azure-sdk/resource-manager/network/2023-06-01/loadbalancers"
+	"github.com/hashicorp/go-azure-sdk/resource-manager/network/2023-09-01/loadbalancers"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/check"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/types"
@@ -190,12 +190,9 @@ func (BackendAddressPoolAddressResourceTests) Destroy(ctx context.Context, clien
 		}
 	}
 
-	backendAddressPool := loadbalancers.BackendAddressPool{
-		Properties: &loadbalancers.BackendAddressPoolPropertiesFormat{
-			LoadBalancerBackendAddresses: &newAddresses,
-		},
-	}
-	err = client.LoadBalancers.LoadBalancersClient.LoadBalancerBackendAddressPoolsCreateOrUpdateThenPoll(ctx, poolId, backendAddressPool)
+	pool.Model.Properties.LoadBalancerBackendAddresses = &newAddresses
+
+	err = client.LoadBalancers.LoadBalancersClient.LoadBalancerBackendAddressPoolsCreateOrUpdateThenPoll(ctx, poolId, *pool.Model)
 	if err != nil {
 		return nil, fmt.Errorf("updating %s: %+v", *id, err)
 	}

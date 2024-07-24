@@ -53,8 +53,8 @@ func (c WebAppsClient) AnalyzeCustomHostnameSlot(ctx context.Context, id SlotId,
 			http.StatusOK,
 		},
 		HttpMethod:    http.MethodGet,
-		Path:          fmt.Sprintf("%s/analyzeCustomHostname", id.ID()),
 		OptionsObject: options,
+		Path:          fmt.Sprintf("%s/analyzeCustomHostname", id.ID()),
 	}
 
 	req, err := c.Client.NewRequest(ctx, opts)
@@ -72,7 +72,10 @@ func (c WebAppsClient) AnalyzeCustomHostnameSlot(ctx context.Context, id SlotId,
 		return
 	}
 
-	if err = resp.Unmarshal(&result.Model); err != nil {
+	var model CustomHostnameAnalysisResult
+	result.Model = &model
+
+	if err = resp.Unmarshal(result.Model); err != nil {
 		return
 	}
 

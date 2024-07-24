@@ -53,8 +53,8 @@ func (c FirewallsClient) GetSupportInfo(ctx context.Context, id FirewallId, opti
 			http.StatusOK,
 		},
 		HttpMethod:    http.MethodPost,
-		Path:          fmt.Sprintf("%s/getSupportInfo", id.ID()),
 		OptionsObject: options,
+		Path:          fmt.Sprintf("%s/getSupportInfo", id.ID()),
 	}
 
 	req, err := c.Client.NewRequest(ctx, opts)
@@ -72,7 +72,10 @@ func (c FirewallsClient) GetSupportInfo(ctx context.Context, id FirewallId, opti
 		return
 	}
 
-	if err = resp.Unmarshal(&result.Model); err != nil {
+	var model SupportInfo
+	result.Model = &model
+
+	if err = resp.Unmarshal(result.Model); err != nil {
 		return
 	}
 

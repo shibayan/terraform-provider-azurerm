@@ -53,8 +53,8 @@ func (c PreRulesClient) GetCounters(ctx context.Context, id PreRuleId, options G
 			http.StatusOK,
 		},
 		HttpMethod:    http.MethodPost,
-		Path:          fmt.Sprintf("%s/getCounters", id.ID()),
 		OptionsObject: options,
+		Path:          fmt.Sprintf("%s/getCounters", id.ID()),
 	}
 
 	req, err := c.Client.NewRequest(ctx, opts)
@@ -72,7 +72,10 @@ func (c PreRulesClient) GetCounters(ctx context.Context, id PreRuleId, options G
 		return
 	}
 
-	if err = resp.Unmarshal(&result.Model); err != nil {
+	var model RuleCounter
+	result.Model = &model
+
+	if err = resp.Unmarshal(result.Model); err != nil {
 		return
 	}
 

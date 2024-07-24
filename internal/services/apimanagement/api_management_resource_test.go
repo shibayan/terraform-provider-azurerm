@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/check"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/testclient"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
+	"github.com/hashicorp/terraform-provider-azurerm/internal/features"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
 )
 
@@ -188,6 +189,22 @@ func TestAccApiManagement_completeUpdateAdditionalLocations(t *testing.T) {
 			"hostname_configuration.0.proxy.2.certificate",                     // not returned from API, sensitive
 			"hostname_configuration.0.proxy.2.certificate_password",            // not returned from API, sensitive
 		),
+		{
+			Config: r.complete(data),
+			Check: acceptance.ComposeTestCheckFunc(
+				check.That(data.ResourceName).ExistsInAzure(r),
+			),
+		},
+		data.ImportStep("certificate", // not returned from API, sensitive
+			"hostname_configuration.0.portal.0.certificate",                    // not returned from API, sensitive
+			"hostname_configuration.0.portal.0.certificate_password",           // not returned from API, sensitive
+			"hostname_configuration.0.developer_portal.0.certificate",          // not returned from API, sensitive
+			"hostname_configuration.0.developer_portal.0.certificate_password", // not returned from API, sensitive
+			"hostname_configuration.0.proxy.1.certificate",                     // not returned from API, sensitive
+			"hostname_configuration.0.proxy.1.certificate_password",            // not returned from API, sensitive
+			"hostname_configuration.0.proxy.2.certificate",                     // not returned from API, sensitive
+			"hostname_configuration.0.proxy.2.certificate_password",            // not returned from API, sensitive
+		),
 	})
 }
 
@@ -250,6 +267,9 @@ func TestAccApiManagement_delegationSettings(t *testing.T) {
 }
 
 func TestAccApiManagement_policy(t *testing.T) {
+	if features.FourPointOhBeta() {
+		t.Skip("Skipping since `policy` has been deprecated and removed in 4.0")
+	}
 	data := acceptance.BuildTestData(t, "azurerm_api_management", "test")
 	r := ApiManagementResource{}
 
@@ -1009,6 +1029,10 @@ resource "azurerm_virtual_network" "test" {
   resource_group_name = azurerm_resource_group.test.name
   location            = azurerm_resource_group.test.location
   address_space       = ["192.168.0.0/24"]
+
+  lifecycle {
+    ignore_changes = [subnet]
+  }
 }
 
 resource "azurerm_subnet" "test" {
@@ -1099,6 +1123,10 @@ resource "azurerm_virtual_network" "test2" {
   resource_group_name = azurerm_resource_group.test2.name
   location            = azurerm_resource_group.test2.location
   address_space       = ["192.168.1.0/24"]
+
+  lifecycle {
+    ignore_changes = [subnet]
+  }
 }
 
 resource "azurerm_subnet" "test2" {
@@ -1615,6 +1643,7 @@ resource "azurerm_api_management" "test" {
   sku_name = "Premium_2"
 
   additional_location {
+    zones    = [1]
     location = azurerm_resource_group.test2.location
     capacity = 2
   }
@@ -1724,6 +1753,10 @@ resource "azurerm_virtual_network" "test" {
   location            = azurerm_resource_group.test.location
   resource_group_name = azurerm_resource_group.test.name
   address_space       = ["10.0.0.0/16"]
+
+  lifecycle {
+    ignore_changes = [subnet]
+  }
 }
 
 resource "azurerm_subnet" "test" {
@@ -1838,6 +1871,10 @@ resource "azurerm_virtual_network" "test2" {
   location            = azurerm_resource_group.test2.location
   resource_group_name = azurerm_resource_group.test2.name
   address_space       = ["10.1.0.0/16"]
+
+  lifecycle {
+    ignore_changes = [subnet]
+  }
 }
 
 resource "azurerm_subnet" "test2" {
@@ -2107,6 +2144,10 @@ resource "azurerm_key_vault" "test" {
   resource_group_name = azurerm_resource_group.test.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
+
+  lifecycle {
+    ignore_changes = [access_policy]
+  }
 }
 
 resource "azurerm_key_vault_access_policy" "test" {
@@ -2293,6 +2334,10 @@ resource "azurerm_key_vault" "test" {
   resource_group_name = azurerm_resource_group.test.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
+
+  lifecycle {
+    ignore_changes = [access_policy]
+  }
 }
 
 resource "azurerm_key_vault_access_policy" "test" {

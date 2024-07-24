@@ -321,16 +321,16 @@ func (r LinuxWebAppResource) Create() sdk.ResourceFunc {
 					// We use the "internal" as the fallback here, if we can read the ASE, we'll get the full one
 					nameSuffix := "appserviceenvironment.net"
 					if ase.Id != nil {
-						aseId, err := parse.AppServiceEnvironmentID(*ase.Id)
+						aseId, err := commonids.ParseAppServiceEnvironmentIDInsensitively(*ase.Id)
 						nameSuffix = fmt.Sprintf("%s.%s", aseId.HostingEnvironmentName, nameSuffix)
 						if err != nil {
 							metadata.Logger.Warnf("could not parse App Service Environment ID determine FQDN for name availability check, defaulting to `%s.%s.appserviceenvironment.net`", webApp.Name, servicePlanId)
 						} else {
-							existingASE, err := aseClient.Get(ctx, aseId.ResourceGroup, aseId.HostingEnvironmentName)
-							if err != nil {
+							existingASE, err := aseClient.Get(ctx, *aseId)
+							if err != nil || existingASE.Model == nil {
 								metadata.Logger.Warnf("could not read App Service Environment to determine FQDN for name availability check, defaulting to `%s.%s.appserviceenvironment.net`", webApp.Name, servicePlanId)
-							} else if props := existingASE.AppServiceEnvironment; props != nil && props.DNSSuffix != nil && *props.DNSSuffix != "" {
-								nameSuffix = *props.DNSSuffix
+							} else if props := existingASE.Model.Properties; props != nil && props.DnsSuffix != nil && *props.DnsSuffix != "" {
+								nameSuffix = *props.DnsSuffix
 							}
 						}
 					}
@@ -405,7 +405,7 @@ func (r LinuxWebAppResource) Create() sdk.ResourceFunc {
 			appSettingsUpdate := helpers.ExpandAppSettingsForUpdate(siteConfig.AppSettings)
 			appSettingsProps := *appSettingsUpdate.Properties
 			if metadata.ResourceData.HasChange("site_config.0.health_check_eviction_time_in_min") {
-				appSettingsProps["WEBSITE_HEALTHCHECK_MAXPINGFAILURES"] = strconv.Itoa(int(webApp.SiteConfig[0].HealthCheckEvictionTime))
+				appSettingsProps["WEBSITE_HEALTHCHECK_MAXPINGFAILURES"] = strconv.FormatInt(webApp.SiteConfig[0].HealthCheckEvictionTime, 10)
 				appSettingsUpdate.Properties = &appSettingsProps
 			}
 
@@ -645,7 +645,12 @@ func (r LinuxWebAppResource) Read() sdk.ResourceFunc {
 					}
 
 					if subnetId := pointer.From(props.VirtualNetworkSubnetId); subnetId != "" {
-						state.VirtualNetworkSubnetID = subnetId
+						// some users have provisioned these without a prefixed `/` - as such we need to normalize these
+						parsed, err := commonids.ParseSubnetIDInsensitively(subnetId)
+						if err != nil {
+							return err
+						}
+						state.VirtualNetworkSubnetID = parsed.ID()
 					}
 				}
 
@@ -847,15 +852,25 @@ func (r LinuxWebAppResource) Update() sdk.ResourceFunc {
 				return fmt.Errorf("updating Linux %s: %+v", id, err)
 			}
 
-			// (@jackofallops) - App Settings can clobber logs configuration so must be updated before we send any Log updates
-			if metadata.ResourceData.HasChanges("app_settings", "site_config") || metadata.ResourceData.HasChange("site_config.0.health_check_eviction_time_in_min") {
+			updateLogs := false
+
+			// sending App Settings updates can clobber logs configuration so must be updated before we send any Log updates
+			if metadata.ResourceData.HasChanges("app_settings", "site_config") {
 				appSettingsUpdate := helpers.ExpandAppSettingsForUpdate(model.Properties.SiteConfig.AppSettings)
 				appSettingsProps := *appSettingsUpdate.Properties
-				appSettingsProps["WEBSITE_HEALTHCHECK_MAXPINGFAILURES"] = strconv.Itoa(int(state.SiteConfig[0].HealthCheckEvictionTime))
-				appSettingsUpdate.Properties = &appSettingsProps
+				if state.SiteConfig[0].HealthCheckEvictionTime != 0 {
+					appSettingsProps["WEBSITE_HEALTHCHECK_MAXPINGFAILURES"] = strconv.FormatInt(state.SiteConfig[0].HealthCheckEvictionTime, 10)
+					appSettingsUpdate.Properties = &appSettingsProps
+				} else {
+					delete(appSettingsProps, "WEBSITE_HEALTHCHECK_MAXPINGFAILURES")
+					appSettingsUpdate.Properties = &appSettingsProps
+				}
+
 				if _, err := client.UpdateApplicationSettings(ctx, *id, *appSettingsUpdate); err != nil {
 					return fmt.Errorf("updating App Settings for Linux %s: %+v", id, err)
 				}
+
+				updateLogs = true
 			}
 
 			if metadata.ResourceData.HasChange("connection_string") {
@@ -891,8 +906,6 @@ func (r LinuxWebAppResource) Update() sdk.ResourceFunc {
 					return fmt.Errorf("updating Sticky Settings for Linux %s: %+v", id, err)
 				}
 			}
-
-			updateLogs := false
 
 			if metadata.ResourceData.HasChange("auth_settings") {
 				authUpdate := helpers.ExpandAuthSettings(state.AuthSettings)

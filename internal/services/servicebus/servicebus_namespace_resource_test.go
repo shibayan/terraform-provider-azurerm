@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/acceptance/check"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/clients"
+	"github.com/hashicorp/terraform-provider-azurerm/internal/features"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
 	"github.com/hashicorp/terraform-provider-azurerm/utils"
 )
@@ -123,7 +124,7 @@ func TestAccAzureRMServiceBusNamespace_basicCapacity(t *testing.T) {
 	data.ResourceTest(t, r, []acceptance.TestStep{
 		{
 			Config:      r.basicCapacity(data),
-			ExpectError: regexp.MustCompile("Service Bus SKU \"Basic\" only supports `capacity` of 0"),
+			ExpectError: regexp.MustCompile("service bus SKU \"Basic\" only supports `capacity` of 0"),
 		},
 	})
 }
@@ -134,12 +135,27 @@ func TestAccAzureRMServiceBusNamespace_premiumCapacity(t *testing.T) {
 	data.ResourceTest(t, r, []acceptance.TestStep{
 		{
 			Config:      r.premiumCapacity(data),
-			ExpectError: regexp.MustCompile("Service Bus SKU \"Premium\" only supports `capacity` of 1, 2, 4, 8 or 16"),
+			ExpectError: regexp.MustCompile("service bus SKU \"Premium\" only supports `capacity` of 1, 2, 4, 8 or 16"),
+		},
+	})
+}
+
+func TestAccAzureRMServiceBusNamespace_premiumMessagingPartition(t *testing.T) {
+	data := acceptance.BuildTestData(t, "azurerm_servicebus_namespace", "test")
+	r := ServiceBusNamespaceResource{}
+	data.ResourceTest(t, r, []acceptance.TestStep{
+		{
+			Config:      r.premiumMessagingPartition(data),
+			ExpectError: regexp.MustCompile("service bus SKU \"Premium\" only supports `premium_messaging_partitions` of 1, 2, 4"),
 		},
 	})
 }
 
 func TestAccAzureRMServiceBusNamespace_zoneRedundant(t *testing.T) {
+	if features.FourPointOhBeta() {
+		t.Skipf("Skipped as 'zone_redundant' property is deprecated in 4.0")
+	}
+
 	data := acceptance.BuildTestData(t, "azurerm_servicebus_namespace", "test")
 	r := ServiceBusNamespaceResource{}
 	data.ResourceTest(t, r, []acceptance.TestStep{
@@ -404,11 +420,12 @@ resource "azurerm_resource_group" "test" {
 }
 
 resource "azurerm_servicebus_namespace" "test" {
-  name                = "acctestservicebusnamespace-%d"
-  location            = azurerm_resource_group.test.location
-  resource_group_name = azurerm_resource_group.test.name
-  sku                 = "Premium"
-  capacity            = 1
+  name                         = "acctestservicebusnamespace-%d"
+  location                     = azurerm_resource_group.test.location
+  resource_group_name          = azurerm_resource_group.test.name
+  sku                          = "Premium"
+  capacity                     = 4
+  premium_messaging_partitions = 1
 }
 `, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
 }
@@ -446,16 +463,17 @@ resource "azurerm_resource_group" "test" {
 }
 
 resource "azurerm_servicebus_namespace" "test" {
-  name                = "acctestservicebusnamespace-%d"
-  location            = azurerm_resource_group.test.location
-  resource_group_name = azurerm_resource_group.test.name
-  sku                 = "Premium"
-  capacity            = 0
+  name                         = "acctestservicebusnamespace-%d"
+  location                     = azurerm_resource_group.test.location
+  resource_group_name          = azurerm_resource_group.test.name
+  sku                          = "Premium"
+  capacity                     = 0
+  premium_messaging_partitions = 1
 }
 `, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
 }
 
-func (ServiceBusNamespaceResource) zoneRedundant(data acceptance.TestData) string {
+func (ServiceBusNamespaceResource) premiumMessagingPartition(data acceptance.TestData) string {
 	return fmt.Sprintf(`
 provider "azurerm" {
   features {}
@@ -471,8 +489,31 @@ resource "azurerm_servicebus_namespace" "test" {
   location            = azurerm_resource_group.test.location
   resource_group_name = azurerm_resource_group.test.name
   sku                 = "Premium"
-  capacity            = 1
-  zone_redundant      = true
+  capacity            = 2
+}
+`, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
+}
+
+// TODO: Remove in v4.0
+func (ServiceBusNamespaceResource) zoneRedundant(data acceptance.TestData) string {
+	return fmt.Sprintf(`
+provider "azurerm" {
+  features {}
+}
+
+resource "azurerm_resource_group" "test" {
+  name     = "acctestRG-%d"
+  location = "%s"
+}
+
+resource "azurerm_servicebus_namespace" "test" {
+  name                         = "acctestservicebusnamespace-%d"
+  location                     = azurerm_resource_group.test.location
+  resource_group_name          = azurerm_resource_group.test.name
+  sku                          = "Premium"
+  premium_messaging_partitions = 1
+  capacity                     = 1
+  zone_redundant               = true
 }
 `, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
 }
@@ -631,11 +672,12 @@ resource "azurerm_key_vault_key" "test" {
 }
 
 resource "azurerm_servicebus_namespace" "test" {
-  name                = "acctestservicebusnamespace-%[2]d"
-  location            = azurerm_resource_group.test.location
-  resource_group_name = azurerm_resource_group.test.name
-  sku                 = "Premium"
-  capacity            = 1
+  name                         = "acctestservicebusnamespace-%[2]d"
+  location                     = azurerm_resource_group.test.location
+  resource_group_name          = azurerm_resource_group.test.name
+  sku                          = "Premium"
+  premium_messaging_partitions = 1
+  capacity                     = 1
 
   identity {
     type = "UserAssigned"
@@ -670,6 +712,10 @@ resource "azurerm_servicebus_namespace" "test" {
   resource_group_name           = azurerm_resource_group.test.name
   sku                           = "Basic"
   public_network_access_enabled = false
+
+  lifecycle {
+    ignore_changes = [network_rule_set]
+  }
 }
 `, data.RandomInteger, data.Locations.Primary, data.RandomInteger)
 }
@@ -712,6 +758,10 @@ resource "azurerm_virtual_network" "test" {
   resource_group_name = azurerm_resource_group.test.name
   address_space       = ["172.17.0.0/16"]
   dns_servers         = ["10.0.0.4", "10.0.0.5"]
+
+  lifecycle {
+    ignore_changes = [subnet]
+  }
 }
 
 resource "azurerm_subnet" "test" {
@@ -724,11 +774,12 @@ resource "azurerm_subnet" "test" {
 }
 
 resource "azurerm_servicebus_namespace" "test" {
-  name                = "acctestservicebusnamespace-%[1]d"
-  location            = azurerm_resource_group.test.location
-  resource_group_name = azurerm_resource_group.test.name
-  sku                 = "Premium"
-  capacity            = 1
+  name                         = "acctestservicebusnamespace-%[1]d"
+  location                     = azurerm_resource_group.test.location
+  resource_group_name          = azurerm_resource_group.test.name
+  sku                          = "Premium"
+  capacity                     = 1
+  premium_messaging_partitions = 1
 
   network_rule_set {
     default_action = "Deny"
@@ -759,6 +810,10 @@ resource "azurerm_virtual_network" "test" {
   resource_group_name = azurerm_resource_group.test.name
   address_space       = ["172.17.0.0/16"]
   dns_servers         = ["10.0.0.4", "10.0.0.5"]
+
+  lifecycle {
+    ignore_changes = [subnet]
+  }
 }
 
 resource "azurerm_subnet" "test" {
@@ -771,12 +826,12 @@ resource "azurerm_subnet" "test" {
 }
 
 resource "azurerm_servicebus_namespace" "test" {
-  name                = "acctestservicebusnamespace-%[1]d"
-  location            = azurerm_resource_group.test.location
-  resource_group_name = azurerm_resource_group.test.name
-  sku                 = "Premium"
-  capacity            = 1
-
+  name                         = "acctestservicebusnamespace-%[1]d"
+  location                     = azurerm_resource_group.test.location
+  resource_group_name          = azurerm_resource_group.test.name
+  sku                          = "Premium"
+  capacity                     = 1
+  premium_messaging_partitions = 1
   network_rule_set {
     default_action                = "Deny"
     trusted_services_allowed      = true
@@ -810,6 +865,10 @@ resource "azurerm_virtual_network" "test" {
   resource_group_name = azurerm_resource_group.test.name
   address_space       = ["172.17.0.0/16"]
   dns_servers         = ["10.0.0.4", "10.0.0.5"]
+
+  lifecycle {
+    ignore_changes = [subnet]
+  }
 }
 
 resource "azurerm_subnet" "test" {
@@ -822,11 +881,12 @@ resource "azurerm_subnet" "test" {
 }
 
 resource "azurerm_servicebus_namespace" "test" {
-  name                = "acctestservicebusnamespace-%[1]d"
-  location            = azurerm_resource_group.test.location
-  resource_group_name = azurerm_resource_group.test.name
-  sku                 = "Premium"
-  capacity            = 1
+  name                         = "acctestservicebusnamespace-%[1]d"
+  location                     = azurerm_resource_group.test.location
+  resource_group_name          = azurerm_resource_group.test.name
+  sku                          = "Premium"
+  capacity                     = 1
+  premium_messaging_partitions = 1
 
   network_rule_set {}
 }

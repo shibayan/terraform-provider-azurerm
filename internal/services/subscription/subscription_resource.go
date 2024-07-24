@@ -62,7 +62,7 @@ func resourceSubscription() *pluginsdk.Resource {
 			"alias": {
 				Type:         pluginsdk.TypeString,
 				Optional:     true,
-				Computed:     true,
+				Computed:     true, // O+C - This value is supplied by the provider if omitted so must remain `Computed`
 				ForceNew:     true,
 				Description:  "The Alias Name of the subscription. If omitted a new UUID will be generated for this property.",
 				ValidateFunc: validation.StringIsNotEmpty,
@@ -103,7 +103,7 @@ func resourceSubscription() *pluginsdk.Resource {
 				Description: "The GUID of the Subscription.",
 				ForceNew:    true,
 				Optional:    true,
-				Computed:    true,
+				Computed:    true, // O+C This must remain computed due to the unique nature of this resource - See resource documentation for notes.
 				ExactlyOneOf: []string{
 					"subscription_id",
 					"billing_scope_id",
@@ -426,7 +426,10 @@ func resourceSubscriptionDelete(d *pluginsdk.ResourceData, meta interface{}) err
 	if !meta.(*clients.Client).Features.Subscription.PreventCancellationOnDestroy {
 		log.Printf("[DEBUG] Cancelling subscription %s", subscriptionId)
 
-		if _, err := aliasClient.SubscriptionCancel(ctx, subscriptionResourceId); err != nil {
+		opts := subscriptionAlias.DefaultSubscriptionCancelOperationOptions()
+		// TODO: support a Provider `features` flag to enable deleting a Subscription containing Resources
+		// This is a dangerous operation, and likely wants a similar default value as to that for Resource Groups
+		if _, err := aliasClient.SubscriptionCancel(ctx, subscriptionResourceId, opts); err != nil {
 			return fmt.Errorf("failed to cancel Subscription: %+v", err)
 		}
 
@@ -498,19 +501,16 @@ func waitForSubscriptionStateToSettle(ctx context.Context, client *subscriptions
 }
 
 func checkExistingAliases(ctx context.Context, client subscriptionAlias.SubscriptionsClient, subscriptionId string) (*string, int, error) {
-	aliasList, err := client.AliasList(ctx)
+	aliasList, err := client.AliasListComplete(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("could not List existing Subscription Aliases")
 	}
 
-	if aliasList.Model == nil || aliasList.Model.Value == nil {
-		return nil, 0, fmt.Errorf("failed reading Subscription Alias list")
-	}
-
-	for _, v := range *aliasList.Model.Value {
+	for _, v := range aliasList.Items {
 		if v.Properties != nil && v.Properties.SubscriptionId != nil && subscriptionId == *v.Properties.SubscriptionId {
-			return v.Name, len(*aliasList.Model.Value), nil
+			return v.Name, len(aliasList.Items), nil
 		}
 	}
-	return nil, len(*aliasList.Model.Value), nil
+
+	return nil, len(aliasList.Items), nil
 }

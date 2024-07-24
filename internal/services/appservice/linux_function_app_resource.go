@@ -409,16 +409,16 @@ func (r LinuxFunctionAppResource) Create() sdk.ResourceFunc {
 					// We use the "internal" as the fallback here, if we can read the ASE, we'll get the full one
 					nameSuffix := "appserviceenvironment.net"
 					if ase.Id != nil {
-						aseId, err := parse.AppServiceEnvironmentID(*ase.Id)
+						aseId, err := commonids.ParseAppServiceEnvironmentIDInsensitively(*ase.Id)
 						nameSuffix = fmt.Sprintf("%s.%s", aseId.HostingEnvironmentName, nameSuffix)
 						if err != nil {
 							metadata.Logger.Warnf("could not parse App Service Environment ID determine FQDN for name availability check, defaulting to `%s.%s.appserviceenvironment.net`", functionApp.Name, servicePlanId)
 						} else {
-							existingASE, err := aseClient.Get(ctx, aseId.ResourceGroup, aseId.HostingEnvironmentName)
-							if err != nil {
+							existingASE, err := aseClient.Get(ctx, *aseId)
+							if err != nil || existingASE.Model == nil {
 								metadata.Logger.Warnf("could not read App Service Environment to determine FQDN for name availability check, defaulting to `%s.%s.appserviceenvironment.net`", functionApp.Name, servicePlanId)
-							} else if props := existingASE.AppServiceEnvironment; props != nil && props.DNSSuffix != nil && *props.DNSSuffix != "" {
-								nameSuffix = *props.DNSSuffix
+							} else if props := existingASE.Model.Properties; props != nil && props.DnsSuffix != nil && *props.DnsSuffix != "" {
+								nameSuffix = *props.DnsSuffix
 							}
 						}
 					}
@@ -578,6 +578,8 @@ func (r LinuxFunctionAppResource) Create() sdk.ResourceFunc {
 				return fmt.Errorf("creating Linux %s: %+v", id, err)
 			}
 
+			metadata.SetID(id)
+
 			stickySettings := helpers.ExpandStickySettings(functionApp.StickySettings)
 
 			if stickySettings != nil {
@@ -642,7 +644,6 @@ func (r LinuxFunctionAppResource) Create() sdk.ResourceFunc {
 				}
 			}
 
-			metadata.SetID(id)
 			return nil
 		},
 	}
@@ -1352,12 +1353,6 @@ func (m *LinuxFunctionAppModel) unpackLinuxFunctionAppSettings(input webapps.Str
 
 		case "AzureWebJobsDashboard__accountName":
 			m.BuiltinLogging = true
-
-		case "WEBSITE_RUN_FROM_PACKAGE":
-			// Keep if user explicitly set, otherwise filter out as will have been added by ADO et al
-			if _, ok := metadata.ResourceData.GetOk("app_settings.WEBSITE_RUN_FROM_PACKAGE"); ok {
-				appSettings[k] = v
-			}
 
 		case "WEBSITE_VNET_ROUTE_ALL":
 			// Filter out - handled by site_config setting `vnet_route_all_enabled`

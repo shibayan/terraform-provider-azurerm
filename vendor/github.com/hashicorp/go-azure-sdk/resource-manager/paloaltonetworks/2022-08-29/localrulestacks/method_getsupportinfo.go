@@ -53,8 +53,8 @@ func (c LocalRulestacksClient) GetSupportInfo(ctx context.Context, id LocalRules
 			http.StatusOK,
 		},
 		HttpMethod:    http.MethodPost,
-		Path:          fmt.Sprintf("%s/getSupportInfo", id.ID()),
 		OptionsObject: options,
+		Path:          fmt.Sprintf("%s/getSupportInfo", id.ID()),
 	}
 
 	req, err := c.Client.NewRequest(ctx, opts)
@@ -72,7 +72,10 @@ func (c LocalRulestacksClient) GetSupportInfo(ctx context.Context, id LocalRules
 		return
 	}
 
-	if err = resp.Unmarshal(&result.Model); err != nil {
+	var model SupportInfo
+	result.Model = &model
+
+	if err = resp.Unmarshal(result.Model); err != nil {
 		return
 	}
 
